@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="https://static.robotwebtools.org/EaselJS/current/easeljs.js"></script>
+    <script src="https://static.robotwebtools.org/EventEmitter2/current/eventemitter2.min.js"></script>
+    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.js"></script>
+    <script src="./js/ros2d.js"></script>
+    <script
+      type="text/javascript"
+      src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"
+    ></script>
+
+    <script>
+      /**
+       * Setup all visualization elements when the page is loaded.
+       */
+      function init() {
+        // Create the main viewer.
+        var ros = new ROSLIB.Ros({
+          url: "ws://localhost:9090",
+        });
+
+        // Create the main viewer.
+        var viewer = new ROS2D.Viewer({
+          divID: "map",
+          width: 500,
+          height: 500,
+        });
+
+        // Setup the map client.
+        var gridClient = new ROS2D.OccupancyGridClient({
+          hint: "this. rom me",
+          ros: ros,
+          rootObject: viewer.scene,
+        });
+        // Scale the canvas to fit to the map
+        gridClient.on("change", function () {
+          viewer.scaleToDimensions(
+            gridClient.currentGrid.width,
+            gridClient.currentGrid.height
+          );
+          viewer.shift(
+            gridClient.currentGrid.pose.position.x,
+            gridClient.currentGrid.pose.position.y
+          );
+        });
+        var poseSub = new ROSLIB.Topic({
+          ros: ros,
+          name: "/amcl_pose",
+          message_type: "nav_msgs/PoseWithCovarianceStamped",
+        });
+
+        var robotMarker = new ROS2D.NavigationImage({
+          size: 1,
+          image: "https://cartha.robotika.systems/js/images/marker.png",
+          pulse: true,
+        });
+        console.log(robotMarker);
+        poseSub.subscribe((msg) => {
+          // set the arrow's position
+          // don't know it needs to be -y and -yaw
+          console.log(msg);
+          robotMarker.x = msg.pose.pose.position.x;
+          robotMarker.y = -msg.pose.pose.position.y;
+
+          // convert the orientation quaternion to euler angles
+          quat = new THREE.Quaternion(
+            msg.pose.pose.orientation.x,
+            msg.pose.pose.orientation.y,
+            msg.pose.pose.orientation.z,
+            msg.pose.pose.orientation.w
+          );
+          euler = new THREE.Euler();
+          euler.setFromQuaternion(quat);
+
+          robotMarker.rotation = -THREE.Math.radToDeg(euler.z);
+        });
+        gridClient.rootObject.addChild(robotMarker);
+        // Callback functions when there is mouse interaction with the polygon
+        var clickedPolygon = false;
+        var selectedPointIndex = null;
+
+        var pointCallBack = function (type, event, index) {
+          //console.log(type);
+          if (type === "mousedown") {
+            if (event.nativeEvent.shiftKey === true) {
+              polygon.remPoint(index);
+            } else {
+              selectedPointIndex = index;
+            }
+          }
+          clickedPolygon = true;
+        };
+
+        var lineCallBack = function (type, event, index) {
+          if (type === "mousedown") {
+            if (event.nativeEvent.ctrlKey === true) {
+              polygon.splitLine(index);
+            }
+          }
+          clickedPolygon = true;
+        };
+
+        // Create the polygon
+        var polygon = new ROS2D.PolygonMarker({
+          lineColor: createjs.Graphics.getRGB(0, 0, 0, 1),
+          pointCallBack: pointCallBack,
+          lineCallBack: lineCallBack,
+          pointSize: 0.2,
+        });
+
+        // Add the polygon to the viewer
+        viewer.scene.addChild(polygon);
+
+        // Event listeners for mouse interaction with the stage
+        viewer.scene.mouseMoveOutside = false; // doesn't seem to work
+        var pose = {};
+        var traceShape = new ROS2D.TraceShape({
+          strokeSize: 0.01,
+          strokeColor: createjs.Graphics.getRGB(255, 0, 0, 1),
+          maxPoses: 250,
+        });
+        viewer.scene.addChild(traceShape);
+        var here = new ROSLIB.Pose();
+        console.log(here);
+        var clickedStage = false;
+        var moveBaseFB = new ROSLIB.Topic({
+          ros: ros,
+          name: "/move_base/feedback",
+          messageType: "move_base_msgs/MoveBaseActionFeedback",
+        });
+        moveBaseFB.subscribe(function (message) {
+          traceShape.addPose(message.feedback.base_position.pose);
+          console.log(message.feedback.base_position.pose);
+          //arrowShape.setPose(message.feedback.base_position.pose);
+          //listener.unsubscribe();
+        });
+        viewer.scene.addEventListener("stagemousemove", function (event) {
+          // Move point when it's dragged
+          /*
+          if (selectedPointIndex !== null) {
+            var pos = viewer.scene.globalToRos(event.stageX, event.stageY);
+            polygon.movePoint(selectedPointIndex, pos);
+          } */
+
+          if (clickedStage) {
+            here.position = viewer.scene.globalToRos(
+              event.stageX,
+              event.stageY
+            );
+            traceShape.addPose(here);
+            console.log(here);
+          }
+        });
+        viewer.scene.addEventListener("stagemousedown", function (event) {
+          clickedStage = true;
+          here.position = viewer.scene.globalToRos(event.stageX, event.stageY);
+          traceShape.addPose(here);
+        });
+        viewer.scene.addEventListener("stagemouseup", function (event) {
+          clickedStage = false;
+          // Add point when not clicked on the polygon
+          /* if (selectedPointIndex !== null) {
+            selectedPointIndex = null;
+          } else if (
+            viewer.scene.mouseInBounds === true &&
+            clickedPolygon === false
+          ) {
+            var pos = viewer.scene.globalToRos(event.stageX, event.stageY);
+            console.log(pos);
+
+            chargestation.addPoint(pos);
+            viewer.scene.addChild(chargestation);
+          }
+          clickedPolygon = false; */
+        });
+        // Create the polygon
+        var polygonn = new ROS2D.PolygonMarker({
+          lineColor: createjs.Graphics.getRGB(255, 0, 0, 1),
+          pointColor: "#56783C",
+          pointCallBack: pointCallBack,
+          lineCallBack: lineCallBack,
+          pointSize: 0.2,
+        });
+
+        var charge = { x: 5.859200236320495, y: -4.475519839553831, z: 0 };
+
+        /* var mm = new ROSLIB.Topic({
+          ros: ros,
+          name: "/map",
+          messageType: "nav_msgs/OccupancyGrid",
+        });
+        mm.subscribe((msg) => {
+          const { data } = msg;
+          var black = 0;
+          var white = 0;
+          var gris = 0;
+
+          for (let i = 0; i < data.length; i++) {
+            if (data[i] == 0) {
+              black++;
+            } else if (data[i] == -1) {
+              white++;
+            } else {
+              gris++;
+            }
+          }
+          console.log(black, white, gris);
+        }); */
+      }
+    </script>
+  </head>
+
+  <body onload="init()">
+    <h1>Simple Draw Example</h1>
+    <p>
+      Click on the canvas to draw.<br />
+      Ctrl-click a line to split it, shift-click a point to remove it.<br />
+      Points are draggable.
+    </p>
+    <div id="map" style="position: absolute; margin-top: 7px"></div>
+  </body>
+</html>
